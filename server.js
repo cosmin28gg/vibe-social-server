@@ -12,8 +12,30 @@ const supabase = createClient(
 // Store active connections: userId -> WebSocket
 const connections = new Map();
 
-// Store offline message queues: userId -> [messages]
+// Store offline message queues: userId -> { messages: [], lastUpdated: timestamp }
 const offlineQueues = new Map();
+
+// Configuration
+const MAX_QUEUE_SIZE = 50; // Max messages per user
+const QUEUE_EXPIRY_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+// Cleanup old offline queues periodically
+setInterval(() => {
+  const now = Date.now();
+  let cleaned = 0;
+  
+  for (const [userId, queueData] of offlineQueues.entries()) {
+    // Remove expired queues (older than 24 hours)
+    if (now - queueData.lastUpdated > QUEUE_EXPIRY_MS) {
+      offlineQueues.delete(userId);
+      cleaned++;
+    }
+  }
+  
+  if (cleaned > 0) {
+    console.log(`🧹 Cleaned ${cleaned} expired offline queues`);
+  }
+}, 60 * 60 * 1000); // Run every hour
 
 const wss = new WebSocket.Server({ port: PORT });
 
@@ -50,10 +72,10 @@ wss.on('connection', (ws) => {
         ws.send(JSON.stringify({ type: 'auth_success', user_id: userId }));
         
         // Send any queued offline messages
-        const queue = offlineQueues.get(userId) || [];
-        if (queue.length > 0) {
-          console.log(`📬 Sending ${queue.length} queued messages to ${userId}`);
-          queue.forEach(msg => ws.send(JSON.stringify(msg)));
+        const queueData = offlineQueues.get(userId);
+        if (queueData && queueData.messages.length > 0) {
+          console.log(`📬 Sending ${queueData.messages.length} queued messages to ${userId}`);
+          queueData.messages.forEach(msg => ws.send(JSON.stringify(msg)));
           offlineQueues.delete(userId);
         }
         
@@ -105,16 +127,24 @@ wss.on('connection', (ws) => {
             deliveredTo.push(recipientId);
             console.log(`  ✅ Delivered to ${recipientId}`);
           } else {
-            // Queue for offline user
+            // Queue for offline user (with size limit)
             if (!offlineQueues.has(recipientId)) {
-              offlineQueues.set(recipientId, []);
+              offlineQueues.set(recipientId, { messages: [], lastUpdated: Date.now() });
             }
-            offlineQueues.get(recipientId).push({
+            const queueData = offlineQueues.get(recipientId);
+            
+            // Add message (keep only last MAX_QUEUE_SIZE messages)
+            queueData.messages.push({
               type: 'new_message',
               message: completeMessage,
             });
+            if (queueData.messages.length > MAX_QUEUE_SIZE) {
+              queueData.messages.shift(); // Remove oldest
+            }
+            queueData.lastUpdated = Date.now();
+            
             offlineTo.push(recipientId);
-            console.log(`  📥 Queued for offline user ${recipientId}`);
+            console.log(`  📥 Queued for offline user ${recipientId} (${queueData.messages.length}/${MAX_QUEUE_SIZE})`);
           }
         }
 
@@ -460,14 +490,21 @@ wss.on('connection', (ws) => {
             console.log(`  ✅ Delivered to ${recipientId}`);
           } else {
             if (!offlineQueues.has(recipientId)) {
-              offlineQueues.set(recipientId, []);
+              offlineQueues.set(recipientId, { messages: [], lastUpdated: Date.now() });
             }
-            offlineQueues.get(recipientId).push({
+            const queueData = offlineQueues.get(recipientId);
+            
+            queueData.messages.push({
               type: 'new_message',
               message: completeMessage,
             });
+            if (queueData.messages.length > MAX_QUEUE_SIZE) {
+              queueData.messages.shift();
+            }
+            queueData.lastUpdated = Date.now();
+            
             offlineTo.push(recipientId);
-            console.log(`  📥 Queued for offline user ${recipientId}`);
+            console.log(`  📥 Queued for offline user ${recipientId} (${queueData.messages.length}/${MAX_QUEUE_SIZE})`);
           }
         }
 
