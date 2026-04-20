@@ -143,17 +143,17 @@ wss.on('connection', (ws) => {
           const msgText = message.message_data?._preview || message.message_data?._plaintext || 'New message';
           
           // Check if group chat
-          const isGroupChat = convoId.startsWith('chatgrp_');
+          const isGroupChat = convo_id.startsWith('chatgrp_');
           let groupId = null;
           let groupName = null;
           
           if (isGroupChat) {
-            groupId = convoId.replace('chatgrp_', '');
+            groupId = convo_id.replace('chatgrp_', '');
             // Fetch group name
             supabase
               .from('conversations')
               .select('name')
-              .eq('id', convoId)
+              .eq('id', convo_id)
               .single()
               .then(({ data }) => {
                 groupName = data?.name;
