@@ -635,6 +635,107 @@ wss.on('connection', (ws) => {
           .catch(err => console.error(`Drawing clear failed: ${err.message}`));
       }
 
+      // ============ AUDIO CALL SIGNALING ============
+
+      // Handle call request (caller initiates)
+      if (message.type === 'call_request') {
+        const { call_id, recipient_id, caller_username, caller_avatar_url } = message;
+        
+        console.log(`📞 Call request from ${userId} to ${recipient_id}`);
+        
+        // Forward to recipient
+        const recipientWs = connections.get(recipient_id);
+        if (recipientWs && recipientWs.readyState === WebSocket.OPEN) {
+          recipientWs.send(JSON.stringify({
+            type: 'call_request',
+            call_id,
+            caller_id: userId,
+            caller_username,
+            caller_avatar_url,
+            timestamp: new Date().toISOString(),
+          }));
+          console.log(`  ✅ Call request delivered to ${recipient_id}`);
+        } else {
+          console.log(`  📥 Recipient ${recipient_id} offline - FCM will handle`);
+        }
+      }
+
+      // Handle call accepted (recipient accepts)
+      if (message.type === 'call_accepted') {
+        const { call_id, caller_id } = message;
+        
+        console.log(`✅ Call ${call_id} accepted by ${userId}`);
+        
+        // Forward to caller
+        const callerWs = connections.get(caller_id);
+        if (callerWs && callerWs.readyState === WebSocket.OPEN) {
+          callerWs.send(JSON.stringify({
+            type: 'call_accepted',
+            call_id,
+            accepter_id: userId,
+            timestamp: new Date().toISOString(),
+          }));
+          console.log(`  ✅ Acceptance delivered to caller ${caller_id}`);
+        }
+      }
+
+      // Handle call rejected (recipient rejects)
+      if (message.type === 'call_rejected') {
+        const { call_id, caller_id } = message;
+        
+        console.log(`❌ Call ${call_id} rejected by ${userId}`);
+        
+        // Forward to caller
+        const callerWs = connections.get(caller_id);
+        if (callerWs && callerWs.readyState === WebSocket.OPEN) {
+          callerWs.send(JSON.stringify({
+            type: 'call_rejected',
+            call_id,
+            rejecter_id: userId,
+            timestamp: new Date().toISOString(),
+          }));
+          console.log(`  ✅ Rejection delivered to caller ${caller_id}`);
+        }
+      }
+
+      // Handle call cancelled (caller cancels before answer)
+      if (message.type === 'call_cancelled') {
+        const { call_id, recipient_id } = message;
+        
+        console.log(`🚫 Call ${call_id} cancelled by ${userId}`);
+        
+        // Forward to recipient
+        const recipientWs = connections.get(recipient_id);
+        if (recipientWs && recipientWs.readyState === WebSocket.OPEN) {
+          recipientWs.send(JSON.stringify({
+            type: 'call_cancelled',
+            call_id,
+            caller_id: userId,
+            timestamp: new Date().toISOString(),
+          }));
+          console.log(`  ✅ Cancellation delivered to ${recipient_id}`);
+        }
+      }
+
+      // Handle call ended (either party ends active call)
+      if (message.type === 'call_ended') {
+        const { call_id, other_user_id } = message;
+        
+        console.log(`📞 Call ${call_id} ended by ${userId}`);
+        
+        // Forward to other user
+        const otherWs = connections.get(other_user_id);
+        if (otherWs && otherWs.readyState === WebSocket.OPEN) {
+          otherWs.send(JSON.stringify({
+            type: 'call_ended',
+            call_id,
+            ender_id: userId,
+            timestamp: new Date().toISOString(),
+          }));
+          console.log(`  ✅ End signal delivered to ${other_user_id}`);
+        }
+      }
+
     } catch (error) {
       console.error('❌ Message handling error:', error);
       ws.send(JSON.stringify({ type: 'error', error: error.message }));
