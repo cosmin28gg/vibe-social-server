@@ -133,10 +133,61 @@ wss.on('connection', (ws) => {
           .then(() => console.log(`  💾 Saved to DB: ${messageId}`))
           .catch(err => console.error(`  ❌ DB save failed: ${err.message}`));
 
-        // Optional: Send push notifications for offline users
-        // You can implement this by fetching FCM tokens from Supabase
-        // and sending via Firebase Admin SDK
-        // For now, let the client handle push notifications
+        // Send push notifications for offline users
+        if (offlineTo.length > 0) {
+          console.log(`  🔔 Triggering FCM for ${offlineTo.length} offline recipients`);
+          
+          // Get sender info for notification
+          const senderUsername = completeMessage.sender_username || 'Someone';
+          const msgType = completeMessage.type || 'text';
+          const msgText = message.message_data?._preview || message.message_data?._plaintext || 'New message';
+          
+          // Check if group chat
+          const isGroupChat = convoId.startsWith('chatgrp_');
+          let groupId = null;
+          let groupName = null;
+          
+          if (isGroupChat) {
+            groupId = convoId.replace('chatgrp_', '');
+            // Fetch group name
+            supabase
+              .from('conversations')
+              .select('name')
+              .eq('id', convoId)
+              .single()
+              .then(({ data }) => {
+                groupName = data?.name;
+              })
+              .catch(() => {});
+          }
+          
+          // Send FCM to each offline recipient
+          for (const recipientId of offlineTo) {
+            supabase.functions
+              .invoke('push', {
+                body: {
+                  recipient_id: recipientId,
+                  type: 'message',
+                  sender_id: userId,
+                  sender_username: senderUsername,
+                  msg_type: msgType,
+                  msg_text: msgText,
+                  is_group_chat: isGroupChat,
+                  group_id: groupId,
+                  group_name: groupName,
+                },
+              })
+              .then(({ data, error }) => {
+                if (error) {
+                  console.error(`  ❌ FCM failed for ${recipientId}:`, error);
+                } else {
+                  const sent = data?.sent || 0;
+                  console.log(`  ✅ FCM sent to ${recipientId} (${sent} devices)`);
+                }
+              })
+              .catch(err => console.error(`  ❌ FCM error for ${recipientId}:`, err.message));
+          }
+        }
       }
 
       // Handle typing indicators
