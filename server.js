@@ -137,56 +137,77 @@ wss.on('connection', (ws) => {
         if (offlineTo.length > 0) {
           console.log(`  🔔 Triggering FCM for ${offlineTo.length} offline recipients`);
           
-          // Get sender info for notification
-          const senderUsername = completeMessage.sender_username || 'Someone';
-          const msgType = completeMessage.type || 'text';
-          const msgText = message.message_data?._preview || message.message_data?._plaintext || 'New message';
-          
-          // Check if group chat
-          const isGroupChat = convo_id.startsWith('chatgrp_');
-          let groupId = null;
-          let groupName = null;
-          
-          if (isGroupChat) {
-            groupId = convo_id.replace('chatgrp_', '');
-            // Fetch group name
-            supabase
-              .from('conversations')
-              .select('name')
-              .eq('id', convo_id)
-              .single()
-              .then(({ data }) => {
+          // Fetch sender info and send notifications (async, non-blocking)
+          (async () => {
+            let senderUsername = 'Someone';
+            let senderAvatarUrl = null;
+            
+            try {
+              const { data: senderData } = await supabase
+                .from('users')
+                .select('username, avatar_url')
+                .eq('id', userId)
+                .single();
+              
+              if (senderData) {
+                senderUsername = senderData.username || 'Someone';
+                senderAvatarUrl = senderData.avatar_url;
+              }
+            } catch (err) {
+              console.error(`  ⚠️ Failed to fetch sender info: ${err.message}`);
+            }
+            
+            const msgType = completeMessage.type || 'text';
+            const msgText = message.message_data?._preview || message.message_data?._plaintext || 'New message';
+            
+            // Check if group chat
+            const isGroupChat = convo_id.startsWith('chatgrp_');
+            let groupId = null;
+            let groupName = null;
+            
+            if (isGroupChat) {
+              groupId = convo_id.replace('chatgrp_', '');
+              // Fetch group name
+              try {
+                const { data } = await supabase
+                  .from('conversations')
+                  .select('name')
+                  .eq('id', convo_id)
+                  .single();
                 groupName = data?.name;
-              })
-              .catch(() => {});
-          }
-          
-          // Send FCM to each offline recipient
-          for (const recipientId of offlineTo) {
-            supabase.functions
-              .invoke('push', {
-                body: {
-                  recipient_id: recipientId,
-                  type: 'message',
-                  sender_id: userId,
-                  sender_username: senderUsername,
-                  msg_type: msgType,
-                  msg_text: msgText,
-                  is_group_chat: isGroupChat,
-                  group_id: groupId,
-                  group_name: groupName,
-                },
-              })
-              .then(({ data, error }) => {
-                if (error) {
-                  console.error(`  ❌ FCM failed for ${recipientId}:`, error);
-                } else {
-                  const sent = data?.sent || 0;
-                  console.log(`  ✅ FCM sent to ${recipientId} (${sent} devices)`);
-                }
-              })
-              .catch(err => console.error(`  ❌ FCM error for ${recipientId}:`, err.message));
-          }
+              } catch (err) {
+                console.error(`  ⚠️ Failed to fetch group name: ${err.message}`);
+              }
+            }
+            
+            // Send FCM to each offline recipient
+            for (const recipientId of offlineTo) {
+              supabase.functions
+                .invoke('push', {
+                  body: {
+                    recipient_id: recipientId,
+                    type: 'message',
+                    sender_id: userId,
+                    sender_username: senderUsername,
+                    sender_avatar_url: senderAvatarUrl,
+                    msg_type: msgType,
+                    msg_text: msgText,
+                    is_group_chat: isGroupChat,
+                    group_id: groupId,
+                    group_name: groupName,
+                  },
+                })
+                .then(({ data, error }) => {
+                  if (error) {
+                    console.error(`  ❌ FCM failed for ${recipientId}:`, error);
+                  } else {
+                    const sent = data?.sent || 0;
+                    console.log(`  ✅ FCM sent to ${recipientId} (${sent} devices)`);
+                  }
+                })
+                .catch(err => console.error(`  ❌ FCM error for ${recipientId}:`, err.message));
+            }
+          })();
         }
       }
 
@@ -246,6 +267,30 @@ wss.on('connection', (ws) => {
             }
           })
           .catch(err => console.error(`Mark seen failed: ${err.message}`));
+      }
+
+      // Handle message deletion
+      if (message.type === 'message_deleted') {
+        const { message_id, convo_id, recipient_ids } = message;
+        
+        console.log(`🗑️ Message deleted: ${message_id} in convo ${convo_id}`);
+        
+        // Forward deletion to all recipients
+        for (const recipientId of recipient_ids) {
+          if (recipientId === userId) continue;
+          
+          const recipientWs = connections.get(recipientId);
+          if (recipientWs && recipientWs.readyState === WebSocket.OPEN) {
+            recipientWs.send(JSON.stringify({
+              type: 'message_deleted',
+              message_id,
+              convo_id,
+            }));
+            console.log(`  ✅ Notified ${recipientId} of deletion`);
+          } else {
+            console.log(`  📥 Recipient ${recipientId} offline - deletion will sync on reconnect`);
+          }
+        }
       }
 
       // Handle sticker placement
