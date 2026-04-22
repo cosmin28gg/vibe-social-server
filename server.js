@@ -736,6 +736,31 @@ wss.on('connection', (ws) => {
         }
       }
 
+      // Handle conversation deletion
+      if (message.type === 'conversation_deleted') {
+        const { convo_id, recipient_ids } = message;
+        
+        console.log(`🗑️ Conversation ${convo_id} deleted by ${userId}`);
+        
+        // Forward deletion to all recipients
+        for (const recipientId of recipient_ids) {
+          if (recipientId === userId) continue;
+          
+          const recipientWs = connections.get(recipientId);
+          if (recipientWs && recipientWs.readyState === WebSocket.OPEN) {
+            recipientWs.send(JSON.stringify({
+              type: 'conversation_deleted',
+              convo_id,
+              deleted_by: userId,
+              timestamp: new Date().toISOString(),
+            }));
+            console.log(`  ✅ Deletion notification delivered to ${recipientId}`);
+          } else {
+            console.log(`  📥 Recipient ${recipientId} offline - will sync on reconnect`);
+          }
+        }
+      }
+
     } catch (error) {
       console.error('❌ Message handling error:', error);
       ws.send(JSON.stringify({ type: 'error', error: error.message }));
