@@ -260,7 +260,28 @@ wss.on('connection', (ws) => {
         }
       }
 
-      // Handle message seen
+      // Handle message seen (new seen_by array approach)
+      if (message.type === 'message_seen') {
+        const { convo_id, recipient_id, message_id } = message;
+        
+        console.log(`👁️ Message ${message_id} seen by ${userId}`);
+        
+        // Broadcast to recipient (sender of the message) - like typing indicator
+        const recipientWs = connections.get(recipient_id);
+        if (recipientWs && recipientWs.readyState === WebSocket.OPEN) {
+          recipientWs.send(JSON.stringify({
+            type: 'message_seen',
+            convo_id,
+            message_id,
+            seen_by: userId,
+          }));
+          console.log(`  ✅ Seen notification delivered to ${recipient_id}`);
+        } else {
+          console.log(`  📥 Recipient ${recipient_id} offline - will sync from DB`);
+        }
+      }
+
+      // Handle message seen (old approach - kept for backward compatibility)
       if (message.type === 'mark_seen') {
         const { message_id, convo_id, sender_id } = message;
         
