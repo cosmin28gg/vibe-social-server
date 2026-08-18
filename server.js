@@ -373,6 +373,7 @@ wss.on('connection', (ws) => {
             user_id: userId,
             ...sticker_data,
           })
+          .then(() => console.log(`✅ Sticker placed via WebSocket`))
           .catch(err => console.error(`Sticker save failed: ${err.message}`));
       }
 
