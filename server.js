@@ -348,7 +348,7 @@ wss.on('connection', (ws) => {
       if (message.type === 'place_sticker') {
         const { convo_id, recipient_ids, sticker_data } = message;
         
-        console.log(`🎨 Sticker placed in ${convo_id}`);
+        console.log(`🎨 Sticker placed in ${convo_id}`, sticker_data);
         
         // Broadcast to all recipients
         for (const recipientId of recipient_ids) {
@@ -366,15 +366,21 @@ wss.on('connection', (ws) => {
         }
         
         // Save to DB (background)
+        const insertData = {
+          convo_id,
+          user_id: userId,
+          url: sticker_data.url,
+          message_id: sticker_data.message_id,
+          offset_x: sticker_data.offset_x,
+          offset_y: sticker_data.offset_y,
+          scale: sticker_data.scale,
+        };
+        
         supabase
           .from('placed_stickers')
-          .insert({
-            convo_id,
-            user_id: userId,
-            ...sticker_data,
-          })
-          .then(() => console.log(`✅ Sticker placed via WebSocket`))
-          .catch(err => console.error(`Sticker save failed: ${err.message}`));
+          .insert(insertData)
+          .then(() => console.log(`✅ Sticker placed via WebSocket: ${JSON.stringify(insertData)}`))
+          .catch(err => console.error(`❌ Sticker save failed: ${err.message}`));
       }
 
       // Handle sticker deletion
@@ -438,7 +444,8 @@ wss.on('connection', (ws) => {
             emoji,
             sound_url,
           })
-          .catch(err => console.error(`Reaction save failed: ${err.message}`));
+          .then(() => console.log(`✅ Reaction saved`))
+          .catch(err => console.error(`❌ Reaction save failed: ${err.message}`));
       }
 
       // Handle reaction removal
@@ -470,7 +477,8 @@ wss.on('connection', (ws) => {
           .eq('message_id', message_id)
           .eq('user_id', userId)
           .eq('emoji', emoji)
-          .catch(err => console.error(`Reaction delete failed: ${err.message}`));
+          .then(() => console.log(`✅ Reaction deleted`))
+          .catch(err => console.error(`❌ Reaction delete failed: ${err.message}`));
       }
 
       // Handle GIF/sticker/audio sticker messages (same as text messages)
